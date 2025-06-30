@@ -54,22 +54,6 @@ Click on the Save button or hit Ctrl+S. If it works you should be able to set th
 
 Now you can ask the LLM to grab a song for you!
 
-### Note
-
-The file will be converted to MP3 after it downloads. 
-
-## File Naming
-
-Downloaded files use the format: `{video_title}.mp3` and are saved to the configured download directory.
-
-## Logging
-
-The server creates detailed logs in `llm_jukebox_mcp_debug.log` including:
-- Search and download operations
-- Performance timing
-- Error details
-- File paths of successful downloads
-
 ## Legal Considerations
 
 This tool is intended for personal use with content you have the right to download. Users are responsible for complying with:
