@@ -2,7 +2,6 @@
 
 A Model Context Protocol (MCP) server that enables LLMs to search, download, and extract information from YouTube music videos. 
 
-![Screenshot](LM_Studio_BkcV2qHbcR.gif)
 ## Features
 
 - **YouTube Music Search**: Find music videos by artist, song title, album, or any search query
