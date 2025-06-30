@@ -1,12 +1,12 @@
 # LLM Jukebox MCP Server
 
-A Model Context Protocol (MCP) server that enables LLMs to search, download, and extract information from YouTube music videos. 
+A Model Context Protocol (MCP) server that enables LLMs to search, download, and play YouTube music. 
 
 ## Features
 
 - **YouTube Music Search**: Find music videos by artist, song title, album, or any search query
 - **Audio Download**: Download and convert YouTube videos to high-quality MP3 files
-- **Video Information**: Extract detailed metadata from YouTube videos
+- **Audio Playback**: Model can start and stop songs
 - **Async Operations**: Non-blocking downloads and searches with progress tracking
 - **Logging**: Debug-level logging to file and stderr
 
@@ -56,50 +56,7 @@ Now you can ask the LLM to grab a song for you!
 
 ### Note
 
-The file will be converted to MP3 after it downloads. The model does not know that this happens, so they might say something about it needing to be converted. It can be a project for you to figure out how to modify the server to tell the model about the MP3 conversion if you want.
-
-## Available Tools
-
-### `test_ytdlp()`
-Tests if yt-dlp is properly installed and accessible.
-
-**Returns**: Version information or error message
-
-### `search_youtube_music(query: str)`
-Searches YouTube for music content and returns the URL of the first result.
-
-**Parameters**:
-- `query`: Search terms (artist, song, album, etc.)
-
-**Returns**: YouTube watch URL or "No results found" message
-
-**Example**: 
-```
-search_youtube_music("Radiohead Creep")
-# Returns: https://www.youtube.com/watch?v=XFkzRNyygfk
-```
-
-### `download_youtube_music(query: str)`
-Searches for and downloads music, converting to MP3 format.
-
-**Parameters**:
-- `query`: Search terms for the desired music
-
-**Returns**: Success message with file paths or error details
-
-**Example**:
-```
-download_youtube_music("The Beatles Yesterday")
-# Downloads and converts to MP3 in the configured directory
-```
-
-### `get_youtube_info(url: str)`
-Extracts detailed information about a YouTube video without downloading.
-
-**Parameters**:
-- `url`: YouTube URL or video ID
-
-**Returns**: JSON-formatted video metadata including title, uploader, duration, view count, upload date, and description
+The file will be converted to MP3 after it downloads. 
 
 ## File Naming
 
@@ -121,3 +78,8 @@ This tool is intended for personal use with content you have the right to downlo
 - Content creators' rights
 
 Always respect intellectual property and consider supporting artists through official channels.
+
+## Credit
+
+Playback tool adapted from https://github.com/Here-and-Tomorrow-LLC/audio-player-mcp (MIT Licensed)
+
