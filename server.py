@@ -68,22 +68,20 @@ def is_single_song(video_info: Dict[str, Any]) -> Dict[str, Any]:
     red_flags = 0
     green_flags = 0
     
-    # Check duration - most individual songs are 1-10 minutes
     if duration:
-        if duration < 60:  # Less than 1 minute
+        if duration < 60: 
             reasons.append(f"Very short duration ({duration}s)")
             red_flags += 1
-        elif duration > 600:  # More than 10 minutes
+        elif duration > 600:
             reasons.append(f"Long duration ({duration//60}m {duration%60}s) suggests compilation")
             red_flags += 2
-        elif 120 <= duration <= 480:  # 2-8 minutes is typical for songs
+        elif 120 <= duration <= 480:
             reasons.append(f"Good song length ({duration//60}m {duration%60}s)")
             green_flags += 2
         else:
             reasons.append(f"Acceptable duration ({duration//60}m {duration%60}s)")
             green_flags += 1
     
-    # Check title for compilation indicators
     compilation_keywords = [
         'best of', 'greatest hits', 'compilation', 'full album', 'entire album',
         'complete album', 'whole album', 'album completo', 'discography',
@@ -98,7 +96,6 @@ def is_single_song(video_info: Dict[str, Any]) -> Dict[str, Any]:
             red_flags += 2
             break
     
-    # Check for track count indicators in title
     import re
     track_patterns = [
         r'\d+\s*songs?', r'\d+\s*tracks?', r'\d+\s*hits?',
@@ -111,12 +108,11 @@ def is_single_song(video_info: Dict[str, Any]) -> Dict[str, Any]:
             red_flags += 2
             break
     
-    # Check description for compilation signs
     if description:
         desc_compilation_signs = [
             'track list', 'tracklist', 'track listing', 'song list',
-            '1.', '2.', '3.',  # Numbered track listings
-            '00:00', '01:', '02:',  # Timestamps suggesting multiple tracks
+            '1.', '2.', '3.', 
+            '00:00', '01:', '02:',
             'full album', 'complete album', 'entire album'
         ]
         
@@ -127,7 +123,6 @@ def is_single_song(video_info: Dict[str, Any]) -> Dict[str, Any]:
         elif compilation_indicators == 1:
             red_flags += 1
     
-    # Look for positive song indicators
     song_indicators = [
         'official video', 'official audio', 'music video', 'lyric video',
         'official lyric', 'lyrics', 'single', 'new single'
@@ -139,7 +134,6 @@ def is_single_song(video_info: Dict[str, Any]) -> Dict[str, Any]:
             green_flags += 1
             break
     
-    # Make decision
     is_single = red_flags <= green_flags
     confidence = "high" if abs(red_flags - green_flags) >= 2 else "medium" if abs(red_flags - green_flags) == 1 else "low"
     
@@ -183,7 +177,6 @@ def cleanup_missing_files() -> Dict[str, int]:
         'remaining': remaining_count
     }
 
-# Internal helper function - not exposed as MCP tool
 async def validate_song_internal(query: str) -> str:
     """Internal validation function - check if result appears to be a single song."""
     logger.info(f"Internal validation for query: {query}")
@@ -217,7 +210,6 @@ async def validate_song_internal(query: str) -> str:
         logger.error(f"Unexpected validation error: {str(e)}")
         return None
 
-# Internal helper function - not exposed as MCP tool  
 async def cleanup_database_internal() -> str:
     """Internal cleanup function - remove missing files from database."""
     logger.info("Internal database cleanup")
@@ -229,7 +221,6 @@ async def cleanup_database_internal() -> str:
         logger.error(f"Error during database cleanup: {str(e)}")
         return f"Cleanup error: {str(e)}"
 
-# Internal helper function - not exposed as MCP tool
 async def search_youtube_music_internal(query: str, include_validation: bool = False) -> str:
     """Internal search function used by download_youtube_music."""
     logger.info(f"Internal search for query: {query}")
@@ -274,84 +265,152 @@ async def search_youtube_music_internal(query: str, include_validation: bool = F
         return None, None
 
 @mcp.tool()
-async def download_youtube_music(query: str, force_download: bool = False) -> str:
-    """	Search YouTube for music, download the first result, discard video, and add to music library.
+async def download_and_play(query: str, force_download: bool = False) -> str:
+    """	Search for and play a song. If the song is already in the library it will 
+        play the existing version, otherwise it will download it first.
     
     Args:
         query: Search query for music (artist, song, album, etc.)
-        force_download: If True, bypass single-song validation and download anyway
+        force_download: Force download even if validation suggests it's a compilation
         
     Returns:
-        Success message with file info, or error message if download failed
+        Success message with file info, or error message if download/play failed
     """
-    logger.info(f"Starting download for query: {query} (force_download: {force_download})")
-    yt_query = f'ytsearch1:{query}'
+    logger.info(f"Starting download_and_play for query: {query} (force_download: {force_download})")
     
-    def perform_download():
-        downloaded_files = []
-        video_info = None
-
-        def progress_hook(d):
-            if d['status'] == 'finished':
-                downloaded_files.append(d['filename'])
-                logger.info(f"Downloaded: {d['filename']}")
-
-        # First, extract info to validate before downloading
-        info_opts = {
-            'quiet': True,
-            'no_warnings': False,
-        }
-        
-        with yt_dlp.YoutubeDL(info_opts) as ydl:
+    def search_library():
+        try:
+            title_match = Track.title.matches(f'.*{query}.*', flags=0)
+            artist_match = Track.artist.matches(f'.*{query}.*', flags=0)
+            query_obj = (title_match | artist_match)
+            
+            tracks = db.search(query_obj)
+            
+            valid_tracks = []
+            for track in tracks:
+                file_path = Path(track.get('file_path', ''))
+                if file_path.exists():
+                    valid_tracks.append(track)
+                else:
+                    logger.warning(f"File missing during search: {file_path}")
+                    db.remove(doc_ids=[track.doc_id])
+            
+            return valid_tracks
+            
+        except Exception as e:
+            logger.error(f"Library search error: {str(e)}")
+            return []
+    
+    def play_track(track):
+        try:
+            file_path = Path(track['file_path'])
+            if not file_path.exists():
+                # Remove from database since file doesn't exist
+                db.remove(doc_ids=[track.doc_id])
+                return f"Audio file not found: {file_path}. Removed from database."
+            
+            supported_formats = {'.mp3', '.ogg', '.wav'}
+            if file_path.suffix.lower() not in supported_formats:
+                return f"Unsupported audio format: {file_path.suffix}. Try re-downloading to get .mp3 format."
+            
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+                logger.info("Initialized audio system")
+            
+            pygame.mixer.music.stop()
+            
             try:
-                info = ydl.extract_info(yt_query, download=False)
-                if not info or 'entries' not in info or len(info['entries']) == 0:
-                    raise Exception("No search results found")
-                
-                video_info = info['entries'][0]
-                
-                # Validate if this appears to be a single song
-                if not force_download:
-                    validation = is_single_song(video_info)
-                    logger.info(f"Song validation result: {validation}")
-                    
-                    if not validation['is_single_song']:
-                        return None, video_info, validation
-                
+                pygame.mixer.music.load(str(file_path))
             except Exception as e:
-                logger.error(f"Info extraction error: {str(e)}")
-                raise
-
-        # Proceed with download if validation passed or was forced
-        ydl_opts = {
-            **YT_DLP_BASE_OPTS,
-            'format': 'bestaudio/best',
-            'postprocessors': [
-                {
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '192',
-                }
-            ],
-            'progress_hooks': [progress_hook], 
-        }
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            try:
-                ydl.download([yt_query])
-                return downloaded_files, video_info, None
-            except Exception as e:
-                logger.error(f"Download error: {str(e)}")
-                raise
+                raise Exception(f"Failed to load audio file: {e}")
+            
+            pygame.mixer.music.play()
+            
+            logger.info(f"Playing: {track['title']} by {track['artist']}")
+            return f"🎵 Now playing: '{track['title']}' by {track['artist']} (from library)"
+            
+        except Exception as e:
+            logger.error(f"Playback error: {str(e)}")
+            return f"Playback error: {str(e)}"
     
     try:
+        # Search existing library first
+        existing_tracks = await asyncio.get_event_loop().run_in_executor(None, search_library)
+        
+        if existing_tracks:
+            # Found existing track(s), play the first match
+            track = existing_tracks[0]
+            logger.info(f"Found existing track: {track['title']} by {track['artist']}")
+            
+            result = await asyncio.get_event_loop().run_in_executor(None, play_track, track)
+            return result
+        
+        # No existing track found, proceed with download
+        logger.info(f"No existing track found for '{query}', proceeding with download")
+        
+        def perform_download():
+            downloaded_files = []
+            video_info = None
+
+            def progress_hook(d):
+                if d['status'] == 'finished':
+                    downloaded_files.append(d['filename'])
+                    logger.info(f"Downloaded: {d['filename']}")
+
+            info_opts = {
+                'quiet': True,
+                'no_warnings': False,
+            }
+            
+            yt_query = f'ytsearch1:{query}'
+            
+            with yt_dlp.YoutubeDL(info_opts) as ydl:
+                try:
+                    info = ydl.extract_info(yt_query, download=False)
+                    if not info or 'entries' not in info or len(info['entries']) == 0:
+                        raise Exception("No search results found")
+                    
+                    video_info = info['entries'][0]
+                    
+                    # Validate if this appears to be a single song
+                    if not force_download:
+                        validation = is_single_song(video_info)
+                        logger.info(f"Song validation result: {validation}")
+                        
+                        if not validation['is_single_song']:
+                            return None, video_info, validation
+                    
+                except Exception as e:
+                    logger.error(f"Info extraction error: {str(e)}")
+                    raise
+
+            ydl_opts = {
+                **YT_DLP_BASE_OPTS,
+                'format': 'bestaudio/best',
+                'postprocessors': [
+                    {
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'mp3',
+                        'preferredquality': '192',
+                    }
+                ],
+                'progress_hooks': [progress_hook], 
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                try:
+                    ydl.download([yt_query])
+                    return downloaded_files, video_info, None
+                except Exception as e:
+                    logger.error(f"Download error: {str(e)}")
+                    raise
+        
         start_time = datetime.now()
         downloaded_files, video_info, validation_result = await asyncio.get_event_loop().run_in_executor(None, perform_download)
         
         end_time = datetime.now()
         duration = (end_time - start_time).total_seconds()
         
-        # Handle validation failure
         if validation_result and not force_download:
             logger.warning(f"Download blocked - appears to be compilation: {validation_result['reason']}")
             return f"❌ Download blocked - this appears to be a compilation/album, not a single song.\n\n" \
@@ -388,9 +447,13 @@ async def download_youtube_music(query: str, force_download: bool = False) -> st
                 db.insert(track_data)
                 logger.info(f"Added to music library: {title} by {artist}")
             
-            success_msg = f"✅ Successfully downloaded song: '{title}' by {artist}\n" \
+            # Now play the downloaded track
+            result = await asyncio.get_event_loop().run_in_executor(None, play_track, track_data)
+            
+            success_msg = f"✅ Downloaded and playing: '{title}' by {artist}\n" \
                          f"📁 File saved as: {Path(music_file).name}\n" \
-                         f"💾 Added to music library database."
+                         f"💾 Added to music library database.\n" \
+                         f"🎵 {result}"
             
             if force_download:
                 success_msg += f"\n⚠️  Note: Validation was bypassed (forced download)"
@@ -406,7 +469,6 @@ async def download_youtube_music(query: str, force_download: bool = False) -> st
         logger.error(f"Unexpected download error: {str(e)}")
         return f"Download error: {str(e)}"
 
-@mcp.tool()
 async def list_music_library(limit: int = 50, artist: Optional[str] = None, search: Optional[str] = None, cleanup: bool = True) -> str:
     """	List tracks in the music library with optional filtering.
     
@@ -427,7 +489,7 @@ async def list_music_library(limit: int = 50, artist: Optional[str] = None, sear
         query_obj = Track
         
         if artist:
-            query_obj = query_obj.artist.matches(f'.*{artist}.*', flags=0)  # Case insensitive
+            query_obj = query_obj.artist.matches(f'.*{artist}.*', flags=0)
         
         if search:
             title_match = Track.title.matches(f'.*{search}.*', flags=0)
@@ -439,7 +501,7 @@ async def list_music_library(limit: int = 50, artist: Optional[str] = None, sear
         else:
             tracks = db.all()
         
-        # Additional file existence check (in case files were deleted since cleanup)
+        # File existence check
         valid_tracks = []
         for track in tracks:
             file_path = Path(track.get('file_path', ''))
@@ -447,7 +509,6 @@ async def list_music_library(limit: int = 50, artist: Optional[str] = None, sear
                 valid_tracks.append(track)
             else:
                 logger.warning(f"File missing during listing: {file_path}")
-                # Remove from database immediately
                 db.remove(doc_ids=[track.doc_id])
         
         valid_tracks.sort(key=lambda x: x.get('download_date', ''), reverse=True)
@@ -475,7 +536,7 @@ async def list_music_library(limit: int = 50, artist: Optional[str] = None, sear
         logger.error(f"Error listing music library: {str(e)}")
         return f"Error listing music library: {str(e)}"
 
-@mcp.tool()
+
 async def play_song(identifier: Union[int, str]) -> str:
     """	Play a song from the music library by ID or title search.
         The song will play in the background and you may resume the
@@ -573,7 +634,6 @@ async def stop_playback() -> str:
         return f"Stop error: {str(e)}"
 
 if __name__ == "__main__":
-    # Perform startup cleanup
     logger.info("Performing startup database cleanup...")
     startup_stats = cleanup_missing_files()
     if startup_stats['removed'] > 0:
