@@ -3,3 +3,4 @@ _server.py
 /old
 /downloads
 *.key
+/__pycache__
