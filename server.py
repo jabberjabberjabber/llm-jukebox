@@ -2,11 +2,13 @@ import asyncio
 import json
 import sys
 import os
-import logging
 import re
+import logging
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Union
 from pathlib import Path
+from contextlib import redirect_stdout, redirect_stderr
+from io import StringIO
 import base64
 
 import yt_dlp
@@ -14,9 +16,13 @@ import pygame.mixer
 from fastmcp import FastMCP
 from tinydb import TinyDB, Query
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Suppress all logging output to stdout/stderr
+logging.getLogger().setLevel(logging.CRITICAL)
+logging.getLogger("yt_dlp").setLevel(logging.CRITICAL)
+logging.getLogger("urllib3").setLevel(logging.CRITICAL)
+
+# Suppress pygame welcome message
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
 
 mcp = FastMCP("LLM Jukebox")
 download_path = Path(os.environ.get("DOWNLOAD_PATH", "./"))
@@ -27,15 +33,31 @@ db = TinyDB(db_path)
 Track = Query()
 
 YT_DLP_BASE_OPTS = {
-    "no_warnings": False,
+    "no_warnings": True,
+    "quiet": True,
     "audioquality": "0",  # Best quality
     "outtmpl": str(download_path / "%(title)s.%(ext)s"),
     "noplaylist": True,
     "extract_flat": False,
+    "logger": logging.getLogger("yt_dlp"),
 }
 
+def suppress_output(func):
+    """Decorator to suppress all stdout/stderr output from a function."""
+    def wrapper(*args, **kwargs):
+        stdout_capture = StringIO()
+        stderr_capture = StringIO()
+        try:
+            with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
+                return func(*args, **kwargs)
+        except Exception as e:
+            # Re-raise the exception but ensure no output leaked
+            raise e
+    return wrapper
+
 def is_single_song(video_info: Dict[str, Any]) -> bool:
-    """Check if a video appears to be a single song rather than a compilation/album.
+    """	Check if a video appears to be a single song rather than a 
+		compilation/album.
 
     Args:
         video_info: Video information from yt-dlp
@@ -157,15 +179,13 @@ def is_single_song(video_info: Dict[str, Any]) -> bool:
                 green_flags += 1
                 break
 
-        logger.info(f"Song analysis - Red flags: {red_flags}, Green flags: {green_flags}")
         return red_flags < green_flags
 
     except Exception as e:
-        logger.error(f"Error analyzing song: {e}")
-        return True  # Default to allowing download if analysis fails
+        return True
 
 def cleanup_missing_files() -> Dict[str, int]:
-    """Remove database entries for files that no longer exist on disk.
+    """	Remove database entries for files that no longer exist on disk.
 
     Returns:
         Dict with 'total_checked', 'removed', and 'remaining' counts
@@ -189,11 +209,11 @@ def cleanup_missing_files() -> Dict[str, int]:
             "remaining": remaining_count,
         }
     except Exception as e:
-        logger.error(f"Error during cleanup: {e}")
         return {"total_checked": 0, "removed": 0, "remaining": 0}
 
+@suppress_output
 def get_youtube_info(query: str) -> Optional[Dict[str, Any]]:
-    """Get YouTube video information without downloading.
+    """	Get YouTube video information without downloading.
     
     Args:
         query: Search query for YouTube
@@ -202,8 +222,7 @@ def get_youtube_info(query: str) -> Optional[Dict[str, Any]]:
         Video information dictionary or None if not found
     """
     info_opts = {
-        "quiet": True,
-        "no_warnings": True,
+        **YT_DLP_BASE_OPTS,
         "extract_flat": False,
     }
     
@@ -218,11 +237,10 @@ def get_youtube_info(query: str) -> Optional[Dict[str, Any]]:
             return info["entries"][0]
             
     except Exception as e:
-        logger.error(f"Error getting YouTube info: {e}")
         return None
 
 def search_library_by_metadata(title: str, artist: str) -> Optional[Dict[str, Any]]:
-    """Search the library using YouTube metadata.
+    """	Search the library using YouTube metadata.
     
     Args:
         title: YouTube video title
@@ -255,11 +273,11 @@ def search_library_by_metadata(title: str, artist: str) -> Optional[Dict[str, An
         return None
         
     except Exception as e:
-        logger.error(f"Error searching library: {e}")
         return None
 
+@suppress_output
 def play_track(track: Dict[str, Any]) -> str:
-    """Play a track from the library.
+    """	Play a track from the library.
     
     Args:
         track: Track dictionary from database
@@ -291,11 +309,11 @@ def play_track(track: Dict[str, Any]) -> str:
         return f"🎵 Now playing: '{track['title']}' by {track['artist']} (from library)"
 
     except Exception as e:
-        logger.error(f"Playback error: {e}")
         return f"Playback error: {str(e)}"
 
+@suppress_output
 def download_and_store_track(video_info: Dict[str, Any], query: str) -> str:
-    """Download a track and store it in the library.
+    """	Download a track and store it in the library.
     
     Args:
         video_info: YouTube video information
@@ -321,8 +339,6 @@ def download_and_store_track(video_info: Dict[str, Any], query: str) -> str:
             }
         ],
         "progress_hooks": [progress_hook],
-        "quiet": True,
-        "no_warnings": True,
     }
 
     try:
@@ -371,13 +387,12 @@ def download_and_store_track(video_info: Dict[str, Any], query: str) -> str:
                 return f"Download completed for: {query}, but no files were found."
                 
     except Exception as e:
-        logger.error(f"Download error: {e}")
         raise Exception(f"Failed to download track: {str(e)}")
 
 @mcp.tool()
-async def download_and_play(query: str) -> str:
-    """Search for and play a song. If the song is already in the library it will
-        play the existing version, otherwise it will download it first.
+def download_and_play(query: str) -> str:
+    """	Search for and play a song. If the song is already in the library it 
+		will play the existing version, otherwise it will download it first.
 
     Args:
         query: Search query for music (artist, song, album, etc.)
@@ -386,17 +401,13 @@ async def download_and_play(query: str) -> str:
         Success message with file info, or error message if download/play failed
     """
     try:
-        logger.info(f"Processing query: {query}")
         
         # Get video information
-        video_info = await asyncio.get_event_loop().run_in_executor(
-            None, get_youtube_info, query
-        )
+        video_info = get_youtube_info(query)
         
         if not video_info:
             return "❌ No search results found on YouTube for your query."
         
-        logger.info(f"Found video: {video_info.get('title', 'Unknown')}")
         
         # Check if it's a single song
         if not is_single_song(video_info):
@@ -411,37 +422,29 @@ async def download_and_play(query: str) -> str:
         youtube_title = video_info.get("title", "")
         youtube_artist = video_info.get("uploader", "")
         
-        existing_track = await asyncio.get_event_loop().run_in_executor(
-            None, search_library_by_metadata, youtube_title, youtube_artist
-        )
+        existing_track = search_library_by_metadata(youtube_title, youtube_artist)
         
         if existing_track:
-            logger.info("Found existing track in library")
-            result = await asyncio.get_event_loop().run_in_executor(
-                None, play_track, existing_track
-            )
+            result = play_track(existing_track)
             return result
         
         # Download new track
-        logger.info("Downloading new track")
-        result = await asyncio.get_event_loop().run_in_executor(
-            None, download_and_store_track, video_info, query
-        )
+        result = download_and_store_track(video_info, query)
         
         return result
 
     except Exception as e:
         error_msg = f"❌ Error processing request: {str(e)}"
-        logger.error(error_msg)
         return error_msg
 
 @mcp.tool()
 async def stop_playback() -> str:
-    """Stop any currently playing song.
+    """	Stop any currently playing song.
 
     Returns:
         Success message or indication that no song was playing
     """
+    @suppress_output
     def stop_current_song():
         try:
             if not pygame.mixer.get_init():
@@ -451,7 +454,6 @@ async def stop_playback() -> str:
             return "⏹️ Playback stopped"
 
         except Exception as e:
-            logger.error(f"Stop error: {e}")
             return f"❌ Error stopping playback: {str(e)}"
 
     try:
@@ -459,12 +461,11 @@ async def stop_playback() -> str:
         return result
     except Exception as e:
         error_msg = f"❌ Error stopping playback: {str(e)}"
-        logger.error(error_msg)
         return error_msg
 
 @mcp.tool()
 async def list_library() -> str:
-    """List all songs in the music library.
+    """	List all songs in the music library.
 
     Returns:
         Formatted list of songs in the library
@@ -501,13 +502,14 @@ async def list_library() -> str:
         
     except Exception as e:
         error_msg = f"❌ Error listing library: {str(e)}"
-        logger.error(error_msg)
         return error_msg
 
 if __name__ == "__main__":
     try:
-        logger.info("Starting MCP Music Server")
         mcp.run(transport="stdio")
+    except KeyboardInterrupt:
+        # Handle graceful shutdown without breaking JSON-RPC
+        pass
     except Exception as e:
-        logger.error(f"Failed to start server: {e}")
-        sys.exit(1)
+        # Log error internally but don't output to stdio
+        pass
