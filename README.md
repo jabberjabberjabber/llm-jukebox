@@ -22,6 +22,16 @@ A Model Context Protocol (MCP) server that enables LLMs to search, download, and
   "command": "uv",
   "args": [
 	"run",
+	"--with",
+	"fastmcp",
+	"--with",
+	"yt-dlp",
+	"--with",
+	"tinydb",
+	"--with",
+	"pygame",
+	"fastmcp",
+	"run",
 	"c:/path/to/llm-jukebox/server.py"
   ],
   "env": {
@@ -39,7 +49,17 @@ If you have no other entries, the full JSON should look something like this:
     "llm-jukebox": {
       "command": "uv",
       "args": [
-        "run",
+		"run",
+		"--with",
+		"fastmcp",
+		"--with",
+		"yt-dlp",
+		"--with",
+		"tinydb",
+		"--with",
+		"pygame",
+		"fastmcp",
+		"run",
         "c:/users/user/llm-jukebox/server.py"
       ],
       "env": {
