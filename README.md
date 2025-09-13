@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/jabberjabberjabber-llm-jukebox-badge.png)](https://mseep.ai/app/jabberjabberjabber-llm-jukebox)
+
 # LLM Jukebox MCP Server
 
 A Model Context Protocol (MCP) server that enables LLMs to search, download, and play YouTube music. 
